@@ -1,0 +1,20 @@
+{
+  "child_id": "12345",
+  "name": "John Doe",
+  "age": 8,
+  "gender": "Male",
+  "diagnosis": "Autism Spectrum Disorder",
+  "preferred_language": "English",
+  "likes": ["puzzles", "drawing", "music"],
+  "dislikes": ["loud noises", "bright lights"],
+  "progress_notes": [
+    {
+      "date": "2024-12-01",
+      "note": "John has been improving in identifying emotions using flashcards."
+    },
+    {
+      "date": "2024-12-02",
+      "note": "He showed hesitation in group activities but participated after encouragement."
+    }
+  ]
+}
