@@ -4,7 +4,6 @@ import uuid
 import json
 from dotenv import load_dotenv
 import os
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 # Load environment variables from .env file
 load_dotenv()
@@ -79,16 +78,26 @@ def insert_interaction_to_pinecone(json_file_path: str):
         question_embedding = generate_embedding(question)
         response_embedding = generate_embedding(response)
 
-        # Prepare vectors for Pinecone
+         # Create vector for the question
         vectors.append({
-            "id": f"interaction_{idx}_question",  # Unique ID for question
+            "id": f"question_{idx}",
             "values": question_embedding,
-            "metadata": {"role": "child", "interaction": f"interaction_{idx}"}
+            "metadata": {
+                "role": "child",
+                "text": interaction["question"],
+                "type": "question"
+            }
         })
+
+        # Create vector for the response
         vectors.append({
-            "id": f"interaction_{idx}_response",  # Unique ID for response
+            "id": f"response_{idx}",
             "values": response_embedding,
-            "metadata": {"role": "therapist", "interaction": f"interaction_{idx}"}
+            "metadata": {
+                "role": "assistant",
+                "text": interaction["response"],
+                "type": "response"
+            }
         })
 
     # Upsert all vectors into Pinecone in batches

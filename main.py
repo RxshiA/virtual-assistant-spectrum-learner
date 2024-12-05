@@ -72,14 +72,25 @@ def similarity_search(query_embedding: list, top_k: int = 5):
 def formulate_openai_query(text: str, emotion: str, context: list):
     # Format context from Pinecone results
     context_str = "\n".join([
-        f"Child: {match['metadata']['role']} - {match['metadata']['interaction']}"
-        for match in context
+        f"Child: {match['metadata']['text']}"  # Assuming metadata contains the question text
+        for match in context if match['metadata']['role'] == 'child'
+    ])
+    
+    response_str = "\n".join([
+        f"Assistant: {match['metadata']['text']}"  # Assuming metadata contains the response text
+        for match in context if match['metadata']['role'] == 'assistant'
     ])
     
     # Formulate query for OpenAI
     query = (
         f"The child said: \"{text}\" with emotion detected as {emotion}.\n\n"
+        f"Relevant past interactions:\n{context_str}\n\n"
+        f"Assistant responses:\n{response_str}\n\n"
+        f"Provide a response that is supportive and suitable for a child with ASD."
     )
+    print("Generated OpenAI Query:")
+    print(query)
+    
     return query
 
 # Function to get response from OpenAI using chat models
