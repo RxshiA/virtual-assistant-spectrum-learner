@@ -10,18 +10,37 @@ from fastapi import FastAPI, File, UploadFile, BackgroundTasks
 from pydub import AudioSegment
 import uvicorn
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import base64
+from pydub import AudioSegment
+from pydub.utils import make_chunks
+
+# Define the response structure expected by the frontend
+class ResponseModel(BaseModel):
+    results: str
+    
+class AudioRequest(BaseModel):
+    audioUrl: str  # Base64-encoded audio data
+    config: dict
+    savedFilePath: str
 
 # Initialize FastAPI app
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Change this to your frontend URL in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Path to save uploaded audio
 AUDIO_FILE_PATH = "temp_audio.wav"
+AUDIO_SAVE_DIR = "audio_files"  # Directory to save original audio files
 
-# API Response Model
-class ResponseModel(BaseModel):
-    text: str
-    emotion: str
-    openai_response: str
+# Create the directory if it doesn't exist
+os.makedirs(AUDIO_SAVE_DIR, exist_ok=True)
 
 # Load the Hugging Face pipeline for speech emotion recognition
 pipe = pipeline("audio-classification", model="ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition")
@@ -69,7 +88,7 @@ def similarity_search(query_embedding: list, top_k: int = 5):
     return results["matches"]
 
 # Function to combine all data for OpenAI query
-def formulate_openai_query(text: str, emotion: str, context: list):
+def formulate_openai_query(text: str, context: list):
     # Format context from Pinecone results
     context_str = "\n".join([
         f"Child: {match['metadata']['text']}"  # Assuming metadata contains the question text
@@ -83,7 +102,7 @@ def formulate_openai_query(text: str, emotion: str, context: list):
     
     # Formulate query for OpenAI
     query = (
-        f"The child said: \"{text}\" with emotion detected as {emotion}.\n\n"
+        f"The child said: \"{text}\".\n\n"
         f"Relevant past interactions:\n{context_str}\n\n"
         f"Assistant responses:\n{response_str}\n\n"
         f"Provide a response that is supportive and suitable for a child with ASD."
@@ -136,50 +155,62 @@ def generate_audio(text: str):
         stream(audio_stream)
 
 # Endpoint to process audio file
+# @app.post("/process-audio", response_model=ResponseModel)
+# async def process_audio( request: AudioRequest):
+#     try:
+#        return ResponseModel(message="RETURNING RESPONSE") 
+
+#     except Exception as e:
+#         return {"error": str(e)}
+
+#     finally:
+#         # Clean up temporary audio file
+#         if os.path.exists(AUDIO_FILE_PATH):
+#             os.remove(AUDIO_FILE_PATH)
+
 @app.post("/process-audio", response_model=ResponseModel)
-async def process_audio(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def process_audio(request: AudioRequest):
     try:
-        # Save uploaded audio file
+        # Decode base64 audio data (assume raw base64 without prefix)
+        audio_data = base64.b64decode(request.audioUrl)
+
+        # Save the audio file
         with open(AUDIO_FILE_PATH, "wb") as f:
-            f.write(await file.read())
-        
-        # Detect emotion
-        emotion = detect_emotion(AUDIO_FILE_PATH)
+            f.write(audio_data)
+        print(f"Audio file saved to: {AUDIO_FILE_PATH}")
+
+        # Convert audio to WAV format using pydub (if necessary)
+        audio = AudioSegment.from_file(AUDIO_FILE_PATH)
+        audio.export(AUDIO_FILE_PATH, format="wav")
+        print("Audio file converted to WAV format")
 
         # Convert speech to text
         recognizer = sr.Recognizer()
         with sr.AudioFile(AUDIO_FILE_PATH) as source:
             audio_data = recognizer.record(source)
             text = recognizer.recognize_google(audio_data)
-
+            print(f"Recognized Text: {text}")
+            
         # Generate embedding and perform similarity search
         query_embedding = generate_embedding(text)
         similar_interactions = similarity_search(query_embedding)
 
         # Formulate OpenAI query
-        prompt = formulate_openai_query(text, emotion, similar_interactions)
+        prompt = formulate_openai_query(text,similar_interactions)
 
         # Get OpenAI response
         openai_response = get_response_from_openai(prompt)
-        
-        # Stream response as audio using ElevenLabs
-        background_tasks.add_task(generate_audio, openai_response)
 
         # Return response
-        return ResponseModel(
-            text=text,
-            emotion=emotion,
-            openai_response=openai_response
-        )
+        return ResponseModel(results=openai_response)
 
     except Exception as e:
-        return {"error": str(e)}
-    
+        return ResponseModel(results=f"Error: {str(e)}")  # Handle errors correctly
+
     finally:
         # Clean up temporary audio file
         if os.path.exists(AUDIO_FILE_PATH):
             os.remove(AUDIO_FILE_PATH)
-
 # Run the app
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
