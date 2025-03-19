@@ -155,19 +155,6 @@ def generate_audio(text: str):
         stream(audio_stream)
 
 # Endpoint to process audio file
-# @app.post("/process-audio", response_model=ResponseModel)
-# async def process_audio( request: AudioRequest):
-#     try:
-#        return ResponseModel(message="RETURNING RESPONSE") 
-
-#     except Exception as e:
-#         return {"error": str(e)}
-
-#     finally:
-#         # Clean up temporary audio file
-#         if os.path.exists(AUDIO_FILE_PATH):
-#             os.remove(AUDIO_FILE_PATH)
-
 @app.post("/process-audio", response_model=ResponseModel)
 async def process_audio(request: AudioRequest):
     try:
@@ -205,6 +192,7 @@ async def process_audio(request: AudioRequest):
         return ResponseModel(results=openai_response)
 
     except Exception as e:
+        print(f"Error in processing audio: {e}")
         return ResponseModel(results=f"Error: {str(e)}")  # Handle errors correctly
 
     finally:
