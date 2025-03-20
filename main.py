@@ -5,7 +5,7 @@ import os
 from transformers import pipeline
 from pinecone import Pinecone, ServerlessSpec
 from openai import OpenAI
-from elevenlabs import generate, stream
+# from elevenlabs import generate, stream
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks
 from pydub import AudioSegment
 import uvicorn
@@ -53,7 +53,7 @@ os.makedirs(AUDIO_SAVE_DIR, exist_ok=True)
 # Load API keys
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-elevenlabs_api_key = (os.getenv("ELEVENLABS_API_KEY"))
+# elevenlabs_api_key = (os.getenv("ELEVENLABS_API_KEY"))
 google_speech_to_text_api_key = os.getenv("GOOGLE_SPEECH_TO_TEXT_API_KEY")
 
 # Define Pinecone index name
@@ -249,15 +249,15 @@ def get_response_from_openai(prompt: str):
 #         print(f"Error in emotion detection: {e}")
 #         return "Unknown"
 
-def generate_audio(text: str):
-        """Generate audio response using ElevenLabs."""
-        audio_stream = generate(
-            api_key=elevenlabs_api_key,
-            text=text,
-            voice="Brian",
-            stream=True
-        )
-        stream(audio_stream)
+# def generate_audio(text: str):
+#         """Generate audio response using ElevenLabs."""
+#         audio_stream = generate(
+#             api_key=elevenlabs_api_key,
+#             text=text,
+#             voice="Brian",
+#             stream=True
+#         )
+#         stream(audio_stream)
 
 # Endpoint to process audio file
 @app.post("/process-audio", response_model=ResponseModel)
