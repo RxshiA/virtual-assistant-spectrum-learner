@@ -1,0 +1,13 @@
+speechrecognition
+librosa
+numpy
+transformers
+pinecone-client
+openai
+elevenlabs
+fastapi
+uvicorn
+pydub
+pydantic
+requests
+python-dotenv

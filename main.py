@@ -1,4 +1,3 @@
-from dotenv import load_dotenv
 import speech_recognition as sr
 import librosa
 import numpy as np
@@ -19,12 +18,15 @@ from pydub.utils import make_chunks
 import requests
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+from typing import List
 
 load_dotenv()
 
 # Define the response structure expected by the frontend
 class ResponseModel(BaseModel):
-    results: str
+    main_response: str
+    follow_up_questions: List[str]
     
 class AudioRequest(BaseModel):
     audioUrl: str  # Base64-encoded audio data
@@ -47,9 +49,6 @@ AUDIO_SAVE_DIR = "audio_files"  # Directory to save original audio files
 
 # Create the directory if it doesn't exist
 os.makedirs(AUDIO_SAVE_DIR, exist_ok=True)
-
-# Load the Hugging Face pipeline for speech emotion recognition
-pipe = pipeline("audio-classification", model="ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition")
 
 # Load API keys
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
@@ -82,7 +81,23 @@ def extract_features(audio_path, sr=22050):
     features = np.hstack([mfccs, chroma, mel])
     return features
 
+import os
+import base64
+import requests
+from pathlib import Path
+from datetime import datetime
+
 def speech_to_text(audio_url, config):
+    """
+    Convert speech to text using Google Cloud Speech-to-Text API.
+
+    Args:
+        audio_url (str): Base64-encoded audio data.
+        config (dict): Configuration for the audio (e.g., encoding, sample rate, language code).
+
+    Returns:
+        str: Transcribed text from the audio.
+    """
     try:
         # Create uploads directory if it doesn't exist
         uploads_dir = Path(__file__).parent / "uploads"
@@ -121,14 +136,19 @@ def speech_to_text(audio_url, config):
         # Make the request to Google Speech-to-Text API
         response = requests.post(api_url, json=payload, headers=headers)
         speech_results = response.json()
+        print("Speech Results: ", speech_results)
 
-        # Add the saved file path to the response
-        response_data = {
-            **speech_results,
-            "savedFilePath": str(file_path)
-        }
+        # Extract the transcribed text
+        if "results" in speech_results and len(speech_results["results"]) > 0:
+            transcribed_text = speech_results["results"][0]["alternatives"][0]["transcript"]
+        else:
+            transcribed_text = "No transcription available."
 
-        return response_data
+        return transcribed_text
+
+    except Exception as err:
+        print(f"Error converting speech to text: {err}")
+        return f"Error: {str(err)}"
 
     except Exception as err:
         print(f"Error converting speech to text: {err}")
@@ -173,35 +193,61 @@ def formulate_openai_query(text: str, context: list):
 
 # Function to get response from OpenAI using chat models
 def get_response_from_openai(prompt: str):
+    # Modify the system instruction to include generating follow-up questions
+    system_instruction = (
+        "You are a voice assistant for a child with autistic spectrum disorders. "
+    "Your purpose is to help the child understand emotions and improve social interaction skills. "
+    "When responding, always include one or two simple follow-up questions that the child could ask to continue the conversation. "
+    "Make sure the questions are phrased in the first person (e.g., 'Whom should I talk to?') and are easy to understand and relevant to the context. "
+    "Format your response as follows:\n\n"
+    "Response: <Your main response>\n"
+    "Follow-up Questions: <Question 1>|<Question 2>"
+    )
+
     response = client.chat.completions.create(
         model="ft:gpt-3.5-turbo-0125:personal:spectrum-learner:AarQpVNF",  # Chat model
         messages=[
-            {"role": "system", "content": "You are a voice assistant of a kid with autistic spectrum disorders and your purpose is to help the kid to understand emotions and improve social interaction skills."},  # System instructions
+            {"role": "system", "content": system_instruction},  # Updated system instructions
             {"role": "user", "content": prompt}  # User input
         ],
         max_tokens=200,
         temperature=0.7
     )
-    return response.choices[0].message.content.strip()
 
-def detect_emotion(audio_path):
-    """
-    Detect emotion from an audio file using a pre-trained Hugging Face model.
-    """
-    try:
-        # Use the pipeline to classify the audio file
-        print(f"Analyzing emotions in: {audio_path}")
-        results = pipe(audio_path)
+    # Extract the response text
+    response_text = response.choices[0].message.content.strip()
+
+    # Split the response into main response and follow-up questions
+    if "Follow-up Questions:" in response_text:
+        main_response, follow_up_questions = response_text.split("Follow-up Questions:")
+        main_response = main_response.replace("Response:", "").strip()
+        follow_up_questions = follow_up_questions.strip().split("|")
+    else:
+        main_response = response_text
+        follow_up_questions = []
+
+    return {
+        "main_response": main_response,
+        "follow_up_questions": follow_up_questions
+    }
+# def detect_emotion(audio_path):
+#     """
+#     Detect emotion from an audio file using a pre-trained Hugging Face model.
+#     """
+#     try:
+#         # Use the pipeline to classify the audio file
+#         print(f"Analyzing emotions in: {audio_path}")
+#         results = pipe(audio_path)
         
-        # Extract the top result (highest confidence emotion)
-        emotion = results[0]['label']
-        confidence = results[0]['score']
+#         # Extract the top result (highest confidence emotion)
+#         emotion = results[0]['label']
+#         confidence = results[0]['score']
         
-        print(f"Detected Emotion: {emotion} (Confidence: {confidence:.2f})")
-        return emotion
-    except Exception as e:
-        print(f"Error in emotion detection: {e}")
-        return "Unknown"
+#         print(f"Detected Emotion: {emotion} (Confidence: {confidence:.2f})")
+#         return emotion
+#     except Exception as e:
+#         print(f"Error in emotion detection: {e}")
+#         return "Unknown"
 
 def generate_audio(text: str):
         """Generate audio response using ElevenLabs."""
@@ -237,8 +283,8 @@ async def process_audio(request: AudioRequest):
             text = recognizer.recognize_google(audio_data)
             print(f"Recognized Text: {text}")
         
-        # stt_text = speech_to_text(request.audioUrl, request.config)
-        # print(f"Speech-to-Text Result: {stt_text}")
+        # text = speech_to_text(request.audioUrl, request.config)
+        # print(f"Speech-to-Text Result: {text}")
             
         # Generate embedding and perform similarity search
         query_embedding = generate_embedding(text)
@@ -251,11 +297,17 @@ async def process_audio(request: AudioRequest):
         openai_response = get_response_from_openai(prompt)
 
         # Return response
-        return ResponseModel(results=openai_response)
+        return ResponseModel(
+            main_response=openai_response["main_response"],
+            follow_up_questions=openai_response["follow_up_questions"]
+        )
 
     except Exception as e:
         print(f"Error in processing audio: {e}")
-        return ResponseModel(results=f"Error: {str(e)}")  # Handle errors correctly
+        return ResponseModel(
+            main_response=f"Error: {str(e)}",
+            follow_up_questions=[]
+        )
 
     finally:
         # Clean up temporary audio file
