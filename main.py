@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 import speech_recognition as sr
 import librosa
 import numpy as np
@@ -15,6 +16,11 @@ from pydantic import BaseModel
 import base64
 from pydub import AudioSegment
 from pydub.utils import make_chunks
+import requests
+from pathlib import Path
+from datetime import datetime
+
+load_dotenv()
 
 # Define the response structure expected by the frontend
 class ResponseModel(BaseModel):
@@ -46,9 +52,10 @@ os.makedirs(AUDIO_SAVE_DIR, exist_ok=True)
 pipe = pipeline("audio-classification", model="ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition")
 
 # Load API keys
-pc = Pinecone(api_key="pcsk_fPUZL_RZ2eZPsVKzXzMyGmr9zoAMnTXyDLrAuxaypEHDwcvxQ18hxYzoaGRtSupepvuwJ")
-client = OpenAI(api_key="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")
-elevenlabs_api_key = "sk_b56ab61e77b0fe28eeab140f6a81543957e01dc71362d3ed"
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+elevenlabs_api_key = (os.getenv("ELEVENLABS_API_KEY"))
+google_speech_to_text_api_key = os.getenv("GOOGLE_SPEECH_TO_TEXT_API_KEY")
 
 # Define Pinecone index name
 INDEX_NAME = "asd-therapy-interactions"
@@ -74,6 +81,58 @@ def extract_features(audio_path, sr=22050):
     # Combine features into a single array
     features = np.hstack([mfccs, chroma, mel])
     return features
+
+def speech_to_text(audio_url, config):
+    try:
+        # Create uploads directory if it doesn't exist
+        uploads_dir = Path(__file__).parent / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create audio recordings directory if it doesn't exist
+        audio_dir = uploads_dir / "audio_recordings"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate a unique filename with timestamp and .wav extension
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        file_name = f"recording_{timestamp}.wav"
+        file_path = audio_dir / file_name
+
+        # Convert base64 string to binary and save to file
+        audio_data = base64.b64decode(audio_url)
+        with open(file_path, 'wb') as audio_file:
+            audio_file.write(audio_data)
+
+        print(f"Audio file saved at: {file_path}")
+
+        # Prepare the request to Google Speech-to-Text API
+        api_url = "https://speech.googleapis.com/v1/speech:recognize"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-goog-api-key": os.getenv("GOOGLE_SPEECH_TO_TEXT_API_KEY")
+        }
+        payload = {
+            "audio": {
+                "content": audio_url
+            },
+            "config": config
+        }
+
+        # Make the request to Google Speech-to-Text API
+        response = requests.post(api_url, json=payload, headers=headers)
+        speech_results = response.json()
+
+        # Add the saved file path to the response
+        response_data = {
+            **speech_results,
+            "savedFilePath": str(file_path)
+        }
+
+        return response_data
+
+    except Exception as err:
+        print(f"Error converting speech to text: {err}")
+        return {"error": str(err)}
 
 # Function to generate OpenAI embeddings
 def generate_embedding(text: str) -> list:
@@ -177,6 +236,9 @@ async def process_audio(request: AudioRequest):
             audio_data = recognizer.record(source)
             text = recognizer.recognize_google(audio_data)
             print(f"Recognized Text: {text}")
+        
+        # stt_text = speech_to_text(request.audioUrl, request.config)
+        # print(f"Speech-to-Text Result: {stt_text}")
             
         # Generate embedding and perform similarity search
         query_embedding = generate_embedding(text)
